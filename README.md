@@ -59,6 +59,20 @@ pnpm run dev:extension
 📱 **Cross-Platform** - Seamless data sync between web app and browser extension
 ⚡ **Real-time** - WebSocket support across web and extension contexts
 
+## 📁 Project Structure
+
+```
+├── standard/           # RedwoodSDK web application
+│   ├── src/           # App components and pages
+│   ├── prisma/        # Database schema and migrations
+│   └── wrangler.jsonc # Cloudflare deployment config
+├── extension/         # Chrome extension companion
+│   ├── src/          # Extension code (popup, background, content)
+│   ├── manifest.json # Extension manifest
+│   └── dist/         # Built extension (after npm run build)
+└── README.md         # This file
+```
+
 ### Add more routes?
 
 As long as you return a valid Response, RedwoodSDK is happy!
@@ -110,10 +124,6 @@ export default defineApp([
 ]);
 ```
 
-Start building immediately → [Quick start guide](https://docs.rwsdk.com/getting-started/quick-start/)
-
----
-
 ## 🚀 React Server Components
 
 RedwoodSDK is true Javascript full-stack:
@@ -143,35 +153,4 @@ export default async function UsersPage() {
     </div>
   );
 }
-```
-
-Setup a database now → [React Server Components](https://docs.rwsdk.com/core/react-server-components/)
-
----
-
-## ⭐️ Like it? Star it!
-
-If this project saves you time or sparks ideas, please [⭐ star the repo](https://github.com/redwoodjs/sdk) — it really helps us grow the community.
-
----
-
-## 🛠 Contributing
-
-This is a Web + Extension boilerplate repository. To contribute:
-
-- Fix bugs or propose improvements to the starter templates
-- Join our community on [Discord](https://discord.gg/redwoodjs)
-
-## 📁 Project Structure
-
-```
-├── standard/           # RedwoodSDK web application
-│   ├── src/           # App components and pages
-│   ├── prisma/        # Database schema and migrations
-│   └── wrangler.jsonc # Cloudflare deployment config
-├── extension/         # Chrome extension companion
-│   ├── src/          # Extension code (popup, background, content)
-│   ├── manifest.json # Extension manifest
-│   └── dist/         # Built extension (after npm run build)
-└── README.md         # This file
 ```
