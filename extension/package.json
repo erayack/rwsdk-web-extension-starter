@@ -1,0 +1,51 @@
+{
+  "name": "@redwoodjs/starter-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension starter for RedwoodSDK with React and Vite",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "clean": "rm -rf dist node_modules/.vite",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "zip": "cd dist && zip -r ../extension.zip . && cd ..",
+    "prepare": "vibe-rules install cursor"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.23",
+    "@eslint/js": "^9.9.0",
+    "@testing-library/jest-dom": "^6.4.6",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/chrome": "^0.0.270",
+    "@types/node": "^22.14.0",
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "@vitejs/plugin-react": "^4.3.3",
+    "@vitest/coverage-v8": "^2.0.5",
+    "@vitest/ui": "^2.0.5",
+    "eslint": "^9.9.0",
+    "eslint-plugin-react-hooks": "^5.1.0-rc.0",
+    "eslint-plugin-react-refresh": "^0.4.9",
+    "globals": "^15.9.0",
+    "jsdom": "^24.1.1",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.0.1",
+    "vibe-rules": "^0.2.31",
+    "vite": "^6.2.6",
+    "vitest": "^2.0.5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

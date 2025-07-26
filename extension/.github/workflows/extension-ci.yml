@@ -1,0 +1,197 @@
+name: Chrome Extension CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  test:
+    name: Test Extension
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run type checking
+        run: npm run type-check
+
+      - name: Run tests
+        run: npm test
+        env:
+          CI: true
+
+      - name: Run lint
+        run: npm run lint
+        continue-on-error: true
+
+  build:
+    name: Build Extension
+    runs-on: ubuntu-latest
+    needs: test
+    
+    strategy:
+      matrix:
+        environment: [development, staging, production]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set environment variables
+        run: |
+          case "${{ matrix.environment }}" in
+            development)
+              echo "VITE_EDGE_API_URL=${{ secrets.DEV_EDGE_API_URL }}" >> $GITHUB_ENV
+              ;;
+            staging)
+              echo "VITE_EDGE_API_URL=${{ secrets.STAGING_EDGE_API_URL }}" >> $GITHUB_ENV
+              ;;
+            production)
+              echo "VITE_EDGE_API_URL=${{ secrets.PROD_EDGE_API_URL }}" >> $GITHUB_ENV
+              ;;
+          esac
+
+      - name: Build extension
+        run: npm run build
+        env:
+          NODE_ENV: ${{ matrix.environment == 'development' && 'development' || 'production' }}
+
+      - name: Create extension package
+        run: npm run zip
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-${{ matrix.environment }}
+          path: |
+            dist/
+            extension.zip
+          retention-days: 30
+
+  deploy-to-chrome-store:
+    name: Deploy to Chrome Web Store
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'release' && github.event.action == 'published'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download production build
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-production
+          path: ./
+
+      - name: Upload to Chrome Web Store
+        uses: mobilefirstllc/cws-publish@latest
+        with:
+          action: 'upload'
+          client_id: ${{ secrets.CHROME_CLIENT_ID }}
+          client_secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh_token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          extension_id: ${{ secrets.CHROME_EXTENSION_ID }}
+          zip_file: extension.zip
+
+      - name: Publish to Chrome Web Store
+        uses: mobilefirstllc/cws-publish@latest
+        with:
+          action: 'publish'
+          client_id: ${{ secrets.CHROME_CLIENT_ID }}
+          client_secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh_token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          extension_id: ${{ secrets.CHROME_EXTENSION_ID }}
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run security audit
+        run: npm audit --audit-level high
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-production
+          path: ./build-scan/
+
+      - name: Scan extension for security issues
+        run: |
+          # Custom security scanning script for Chrome extensions
+          echo "Scanning extension for common security issues..."
+          
+          # Check for eval usage
+          if grep -r "eval(" build-scan/dist/; then
+            echo "Warning: eval() usage detected"
+            exit 1
+          fi
+          
+          # Check for inline scripts
+          if grep -r "javascript:" build-scan/dist/; then
+            echo "Warning: Inline JavaScript detected"
+            exit 1
+          fi
+          
+          # Check manifest permissions
+          if grep -E "(tabs|history|bookmarks)" build-scan/dist/manifest.json; then
+            echo "Info: Sensitive permissions detected, ensure they are necessary"
+          fi
+          
+          echo "Security scan completed"
+
+  notify:
+    name: Notify Deployment
+    runs-on: ubuntu-latest
+    needs: [deploy-to-chrome-store]
+    if: always()
+    
+    steps:
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        if: always()
