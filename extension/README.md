@@ -22,8 +22,8 @@ This extension is designed to work with the **Standard RedwoodSDK Starter** web 
 - **Cross-Platform Features**: Extend web app functionality into browser tabs
 
 To set up the complete system, you'll need both:
-1. **Web App**: Use `@starters/standard` for your main application
-2. **Extension**: Use this starter for the browser extension
+1. **Web App**: Use the `standard/` folder for your main application
+2. **Extension**: Use the `extension/` folder for the browser extension
 
 ## Getting Started
 
