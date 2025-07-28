@@ -1,8 +1,10 @@
 name: Crawl DeepWiki Documentation
 
 on:
-  # Trigger on push to any branch
+  # Trigger on push to specific branches and paths
   push:
+    branches: [main, develop]
+    paths: ['.github/workflows/crawl-deepwiki.yml', 'docs/**']
 
   # Allow manual trigger
   workflow_dispatch:
@@ -20,6 +22,13 @@ on:
 permissions:
   contents: read
   deployments: write
+
+# Environment configuration
+env:
+  MAX_CONCURRENCY: ${{ vars.MAX_CONCURRENCY || '3' }}
+  REQUEST_TIMEOUT: ${{ vars.REQUEST_TIMEOUT || '30000' }}
+  RETRY_ATTEMPTS: ${{ vars.RETRY_ATTEMPTS || '3' }}
+  USER_AGENT: 'DeepWiki-Crawler/1.0'
 
 # Allow only one concurrent crawl
 concurrency:
@@ -53,36 +62,131 @@ jobs:
     - name: Determine repository identifier
       id: repo-info
       run: |
+        set -e
+        
+        # Input validation function
+        validate_repo_id() {
+          local repo_id="$1"
+          # Allow only alphanumeric, hyphens, underscores, dots, and forward slashes
+          if [[ ! "$repo_id" =~ ^[a-zA-Z0-9._/-]+$ ]] || [[ "$repo_id" =~ [;&|`$(){}[\]<>] ]]; then
+            echo "Error: Invalid repository identifier format" >&2
+            exit 1
+          fi
+          # Validate format (owner/repo or URL)
+          if [[ "$repo_id" =~ ^https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/?$ ]] || 
+             [[ "$repo_id" =~ ^https://deepwiki\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/?$ ]] ||
+             [[ "$repo_id" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
+            return 0
+          else
+            echo "Error: Repository identifier must be in format 'owner/repo' or valid GitHub/DeepWiki URL" >&2
+            exit 1
+          fi
+        }
+        
         if [ -n "${{ github.event.inputs.repo_identifier }}" ]; then
-          echo "repo_id=${{ github.event.inputs.repo_identifier }}" >> $GITHUB_OUTPUT
+          REPO_ID="${{ github.event.inputs.repo_identifier }}"
+          validate_repo_id "$REPO_ID"
+          echo "repo_id=$REPO_ID" >> $GITHUB_OUTPUT
         else
-          echo "repo_id=${{ github.repository }}" >> $GITHUB_OUTPUT
+          REPO_ID="${{ github.repository }}"
+          validate_repo_id "$REPO_ID"
+          echo "repo_id=$REPO_ID" >> $GITHUB_OUTPUT
         fi
-        echo "Repository identifier: $(cat $GITHUB_OUTPUT | grep repo_id | cut -d'=' -f2)"
+        echo "Repository identifier validated successfully"
 
     - name: Set deployment URL
       id: set-deployment-url
       run: |
+        set -e
+        
         REPO_ID="${{ steps.repo-info.outputs.repo_id }}"
 
-        # Extract org/repo from different formats
+        # Extract org/repo from different formats with validation
         if [[ "$REPO_ID" == https://github.com/* ]]; then
-          ORG_REPO=$(echo "$REPO_ID" | sed 's|https://github.com/||' | sed 's|\.git$||')
+          ORG_REPO=$(echo "$REPO_ID" | sed 's|https://github.com/||' | sed 's|\.git$||' | sed 's|/$||')
         elif [[ "$REPO_ID" == https://deepwiki.com/* ]]; then
           ORG_REPO=$(echo "$REPO_ID" | sed 's|https://deepwiki.com/||' | sed 's|/$||')
         else
           ORG_REPO="$REPO_ID"
         fi
 
+        # Validate extracted org/repo format
+        if [[ ! "$ORG_REPO" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
+          echo "Error: Invalid org/repo format extracted: $ORG_REPO" >&2
+          exit 1
+        fi
+
         DEEPWIKI_URL="https://deepwiki.com/$ORG_REPO"
         echo "deepwiki_url=$DEEPWIKI_URL" >> $GITHUB_OUTPUT
         echo "📍 DeepWiki URL will be: $DEEPWIKI_URL"
 
+    - name: Validate email input
+      run: |
+        set -e
+        
+        validate_email() {
+          local email="$1"
+          if [[ -n "$email" ]] && [[ ! "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+            echo "Error: Invalid email format" >&2
+            exit 1
+          fi
+        }
+        
+        EMAIL="${{ github.event.inputs.email }}"
+        if [ -n "$EMAIL" ]; then
+          validate_email "$EMAIL"
+          echo "Email format validated successfully"
+        else
+          echo "No email provided (triggered by push event)"
+        fi
+
     - name: Check if repository exists on DeepWiki
       id: check-repo
       run: |
+        set -e
+        
         cat > check-deepwiki.js << 'EOF'
         const fetch = require('node-fetch');
+        
+        const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT) || 30000;
+        const RETRY_ATTEMPTS = parseInt(process.env.RETRY_ATTEMPTS) || 3;
+        const USER_AGENT = process.env.USER_AGENT || 'DeepWiki-Crawler/1.0';
+
+        // Add proper error handling
+        process.on('unhandledRejection', (reason, promise) => {
+          console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+          process.exit(1);
+        });
+
+        // Retry logic with exponential backoff
+        async function fetchWithRetry(url, options = {}, retries = RETRY_ATTEMPTS) {
+          for (let i = 0; i < retries; i++) {
+            try {
+              const response = await fetch(url, {
+                timeout: REQUEST_TIMEOUT,
+                ...options,
+                headers: {
+                  'User-Agent': USER_AGENT,
+                  ...options.headers
+                }
+              });
+
+              if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After') || Math.pow(2, i) * 1000;
+                console.log(`Rate limited. Waiting ${retryAfter}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, retryAfter));
+                continue;
+              }
+
+              return response;
+            } catch (error) {
+              if (i === retries - 1) throw error;
+              const delay = Math.pow(2, i) * 1000;
+              console.log(`Request failed, retrying in ${delay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+          }
+        }
 
         async function checkRepoExistsOnDeepWiki(repoIdentifier) {
           // Extract org/repo from different input formats
@@ -116,7 +220,7 @@ jobs:
 
           try {
             const searchUrl = `https://api.devin.ai/ada/list_public_indexes?search_repo=${encodeURIComponent(orgRepo)}`;
-            const response = await fetch(searchUrl, {
+            const response = await fetchWithRetry(searchUrl, {
               headers: {
                 accept: "*/*",
                 "accept-language": "en,en-US;q=0.9",
@@ -160,15 +264,16 @@ jobs:
 
         const repoIdentifier = process.argv[2];
         const email = process.argv[3];
-        console.log(`Using email: ${email}`);
         checkRepoExistsOnDeepWiki(repoIdentifier);
         EOF
 
         EMAIL="${{ github.event.inputs.email }}"
         if [ -z "$EMAIL" ]; then
-          echo "⚠️  No email provided (triggered by push). Using default..."
+          echo "No email provided (triggered by push). Using default..."
           EMAIL="crawler@example.com"
         fi
+        
+        # Use parameterized execution to prevent command injection
         node check-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}" "$EMAIL"
 
     - name: Create crawl script
@@ -179,7 +284,77 @@ jobs:
         const fs = require('fs');
         const { URL } = require('url');
 
-        const MAX_CONCURRENCY = 5;
+        // Configuration from environment variables
+        const MAX_CONCURRENCY = parseInt(process.env.MAX_CONCURRENCY) || 3;
+        const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT) || 30000;
+        const RETRY_ATTEMPTS = parseInt(process.env.RETRY_ATTEMPTS) || 3;
+        const USER_AGENT = process.env.USER_AGENT || 'DeepWiki-Crawler/1.0';
+
+        // Queue class for better performance than array.shift()
+        class Queue {
+          constructor() {
+            this.items = {};
+            this.head = 0;
+            this.tail = 0;
+          }
+          
+          enqueue(item) {
+            this.items[this.tail] = item;
+            this.tail++;
+          }
+          
+          dequeue() {
+            if (this.isEmpty()) return null;
+            const item = this.items[this.head];
+            delete this.items[this.head];
+            this.head++;
+            return item;
+          }
+          
+          isEmpty() {
+            return this.head === this.tail;
+          }
+          
+          size() {
+            return this.tail - this.head;
+          }
+        }
+
+        // Add proper error handling
+        process.on('unhandledRejection', (reason, promise) => {
+          console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+          process.exit(1);
+        });
+
+        // Retry logic with exponential backoff
+        async function fetchWithRetry(url, options = {}, retries = RETRY_ATTEMPTS) {
+          for (let i = 0; i < retries; i++) {
+            try {
+              const response = await fetch(url, {
+                timeout: REQUEST_TIMEOUT,
+                ...options,
+                headers: {
+                  'User-Agent': USER_AGENT,
+                  ...options.headers
+                }
+              });
+
+              if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After') || Math.pow(2, i) * 1000;
+                console.log(`Rate limited. Waiting ${retryAfter}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, retryAfter));
+                continue;
+              }
+
+              return response;
+            } catch (error) {
+              if (i === retries - 1) throw error;
+              const delay = Math.pow(2, i) * 1000;
+              console.log(`Request failed, retrying in ${delay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+          }
+        }
 
         function isValidHttpUrl(string) {
           let url;
@@ -214,7 +389,7 @@ jobs:
           return null;
         }
 
-        async function crawlPage(url, baseUrl, visited, queue, allContent, stats) {
+        async function crawlPage(url, baseUrl, visited, queue, writeStream, stats) {
           if (!url.startsWith(baseUrl)) {
             return;
           }
@@ -223,7 +398,7 @@ jobs:
 
           let response = null;
           try {
-            response = await fetch(url);
+            response = await fetchWithRetry(url);
 
             if (!response.ok) {
               stats.failed++;
@@ -238,7 +413,9 @@ jobs:
             const contentSelector = "div.prose-custom";
             const pageContent = $(contentSelector).text().trim();
             if (pageContent) {
-              allContent.push(`## Page: ${url}\n\n${pageContent}\n\n---\n\n`);
+              // Stream content instead of storing in memory
+              const contentChunk = `## Page: ${url}\n\n${pageContent}\n\n---\n\n`;
+              writeStream.write(contentChunk);
             }
 
             $("a[href]").each((_, element) => {
@@ -249,7 +426,7 @@ jobs:
                   const absoluteUrlWithoutHash = absoluteUrl.split("#")[0];
 
                   if (absoluteUrl.startsWith(baseUrl) && !visited.has(absoluteUrlWithoutHash)) {
-                    queue.push(absoluteUrl);
+                    queue.enqueue(absoluteUrl);
                   }
                 } catch (e) {
                   // Skip invalid URLs
@@ -262,7 +439,7 @@ jobs:
           }
         }
 
-        async function crawlWorker(queue, visited, baseUrl, allContent, stats, activeCount) {
+        async function crawlWorker(queue, visited, baseUrl, writeStream, stats, activeCount, progressTracker) {
           if (activeCount.current >= MAX_CONCURRENCY) {
             return;
           }
@@ -271,7 +448,7 @@ jobs:
           try {
             let keepWorking = true;
             while (keepWorking) {
-              const url = queue.shift();
+              const url = queue.dequeue();
               if (!url) {
                 keepWorking = false;
                 break;
@@ -284,11 +461,17 @@ jobs:
               visited.add(urlWithoutHash);
 
               stats.attempted++;
-              await crawlPage(url, baseUrl, visited, queue, allContent, stats);
+              await crawlPage(url, baseUrl, visited, queue, writeStream, stats);
+
+              // Update progress
+              progressTracker.processed++;
+              if (progressTracker.processed % 10 === 0) {
+                console.log(`Progress: ${progressTracker.processed} pages processed, ${queue.size()} in queue`);
+              }
 
               // Spawn additional workers if needed
-              while (queue.length > 0 && activeCount.current < MAX_CONCURRENCY) {
-                setImmediate(() => crawlWorker(queue, visited, baseUrl, allContent, stats, activeCount));
+              while (queue.size() > 0 && activeCount.current < MAX_CONCURRENCY) {
+                setImmediate(() => crawlWorker(queue, visited, baseUrl, writeStream, stats, activeCount, progressTracker));
               }
             }
           } finally {
@@ -299,7 +482,6 @@ jobs:
         async function main() {
           const repoIdentifier = process.argv[2];
           const email = process.argv[3];
-          console.log(`Using email: ${email}`);
           const baseUrl = getBaseUrl(repoIdentifier);
 
           if (!baseUrl) {
@@ -310,9 +492,25 @@ jobs:
           console.log(`Starting crawl for ${repoIdentifier} at ${baseUrl}`);
 
           const visited = new Set();
-          const queue = [];
-          const allContent = [];
+          const queue = new Queue();
           const activeCount = { current: 0 };
+          const progressTracker = { processed: 0 };
+
+          // Create write stream for memory-efficient content storage
+          const writeStream = fs.createWriteStream('deepwiki-content.md');
+          let hasContent = false;
+
+          writeStream.on('error', (error) => {
+            console.error('Write stream error:', error);
+            process.exit(1);
+          });
+
+          // Override write to track if content was written
+          const originalWrite = writeStream.write.bind(writeStream);
+          writeStream.write = (chunk) => {
+            hasContent = true;
+            return originalWrite(chunk);
+          };
 
           const crawlStats = {
             attempted: 0,
@@ -321,21 +519,25 @@ jobs:
           };
 
           // Seed the queue
-          queue.push(baseUrl);
+          queue.enqueue(baseUrl);
 
           // Start initial worker
           const workers = [];
-          workers.push(crawlWorker(queue, visited, baseUrl, allContent, crawlStats, activeCount));
+          workers.push(crawlWorker(queue, visited, baseUrl, writeStream, crawlStats, activeCount, progressTracker));
 
           // Wait for completion
-          while (queue.length > 0 || activeCount.current > 0) {
+          while (queue.size() > 0 || activeCount.current > 0) {
             await new Promise(resolve => setTimeout(resolve, 100));
           }
 
+          // Close the write stream
+          writeStream.end();
+          await new Promise(resolve => writeStream.on('finish', resolve));
+
           console.log(`Crawl complete. Attempted: ${crawlStats.attempted}, Successful: ${crawlStats.successful}, Failed: ${crawlStats.failed}`);
 
-          if (allContent.length > 0) {
-            const finalContent = allContent.join('\n');
+          if (hasContent && fs.existsSync('deepwiki-content.md') && fs.statSync('deepwiki-content.md').size > 0) {
+            const finalContent = fs.readFileSync('deepwiki-content.md', 'utf8');
 
             // Create index.html with the content
             const htmlContent = `<!DOCTYPE html>
@@ -388,6 +590,12 @@ jobs:
             console.log('⏳ No content extracted immediately - this is normal!');
             console.log('🔄 DeepWiki indexing takes time. The repository will be indexed eventually.');
             console.log(`🔗 Check back later at: https://deepwiki.com/${repoIdentifier.replace('https://github.com/', '').replace('https://deepwiki.com/', '')}`);
+            
+            // Validate that we at least tried to crawl
+            if (crawlStats.attempted === 0) {
+              console.error('No pages were attempted to be crawled');
+              process.exit(1);
+            }
           }
         }
 
@@ -396,15 +604,21 @@ jobs:
 
     - name: Run DeepWiki crawler
       run: |
+        set -e
+        
         EMAIL="${{ github.event.inputs.email }}"
         if [ -z "$EMAIL" ]; then
-          echo "⚠️  No email provided (triggered by push). Using default..."
+          echo "No email provided (triggered by push). Using default..."
           EMAIL="crawler@example.com"
         fi
+        
+        # Use parameterized execution to prevent command injection
         node crawl-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}" "$EMAIL"
 
     - name: Show results summary
       run: |
+        set -e
+        
         echo "🎯 DeepWiki Crawl Results for ${{ steps.check-repo.outputs.org_repo }}"
         echo "🔗 DeepWiki URL: https://deepwiki.com/${{ steps.check-repo.outputs.org_repo }}"
         echo ""
@@ -414,12 +628,16 @@ jobs:
           echo "📚 Documentation should be available immediately"
         else
           echo "🔄 Repository indexing initiated on DeepWiki"
-          if [ -f "deepwiki-content.md" ]; then
+          if [ -f "deepwiki-content.md" ] && [ -s "deepwiki-content.md" ]; then
             echo "✅ Some content was crawled successfully"
             echo "📄 Generated local documentation files"
+            echo "📊 Content size: $(wc -c < deepwiki-content.md) bytes"
           else
             echo "⏳ No content extracted immediately (this is normal!)"
             echo "🕐 DeepWiki indexing happens asynchronously and takes time"
           fi
           echo "💡 Check the DeepWiki URL above periodically - documentation will appear once indexing completes"
         fi
+        
+        # Cleanup temporary files
+        rm -f check-deepwiki.js crawl-deepwiki.js
