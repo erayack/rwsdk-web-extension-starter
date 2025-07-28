@@ -9,7 +9,6 @@ It provides:
 - 🔄 **Shared Authentication** - Users stay logged in across both platforms
 - 📱 **Data Synchronization** - Real-time sync between web and extension
 
----
 
 ## 📦 Quickstart
 
