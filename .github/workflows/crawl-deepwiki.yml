@@ -12,22 +12,21 @@ on:
         required: false
         default: ''
         type: string
+      email:
+        description: 'Email address for crawling authentication'
+        required: true
+        type: string
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# Allow only one concurrent deployment
+# Allow only one concurrent crawl
 concurrency:
   group: "deepwiki-crawl"
   cancel-in-progress: false
 
 jobs:
-  crawl-and-deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  crawl:
     runs-on: ubuntu-latest
     outputs:
       repo_exists: ${{ steps.check-repo.outputs.repo_exists }}
@@ -138,10 +137,17 @@ jobs:
         }
 
         const repoIdentifier = process.argv[2];
+        const email = process.argv[3];
+        console.log(`Using email: ${email}`);
         checkRepoExistsOnDeepWiki(repoIdentifier);
         EOF
 
-        node check-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}"
+        EMAIL="${{ github.event.inputs.email }}"
+        if [ -z "$EMAIL" ]; then
+          echo "⚠️  No email provided (triggered by push). Using default..."
+          EMAIL="crawler@example.com"
+        fi
+        node check-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}" "$EMAIL"
 
     - name: Create crawl script
       run: |
@@ -270,6 +276,8 @@ jobs:
 
         async function main() {
           const repoIdentifier = process.argv[2];
+          const email = process.argv[3];
+          console.log(`Using email: ${email}`);
           const baseUrl = getBaseUrl(repoIdentifier);
 
           if (!baseUrl) {
@@ -365,31 +373,22 @@ jobs:
 
     - name: Run DeepWiki crawler
       run: |
-        node crawl-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}"
-
-    - name: Setup Pages
-      uses: actions/configure-pages@v4
-
-    - name: Upload artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: '.'
-
-    - name: Deploy to GitHub Pages
-      id: deployment
-      uses: actions/deploy-pages@v4
+        EMAIL="${{ github.event.inputs.email }}"
+        if [ -z "$EMAIL" ]; then
+          echo "⚠️  No email provided (triggered by push). Using default..."
+          EMAIL="crawler@example.com"
+        fi
+        node crawl-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}" "$EMAIL"
 
     - name: Show results summary
       run: |
         if [ "${{ steps.check-repo.outputs.repo_exists }}" == "true" ]; then
           echo "✅ Repository ${{ steps.check-repo.outputs.org_repo }} was already indexed on DeepWiki!"
-          echo "🔗 Original DeepWiki: https://deepwiki.com/${{ steps.check-repo.outputs.org_repo }}"
-          echo "🔗 GitHub Pages mirror: ${{ steps.deployment.outputs.page_url }}"
+          echo "🔗 DeepWiki: https://deepwiki.com/${{ steps.check-repo.outputs.org_repo }}"
         else
           if [ -f "deepwiki-content.md" ]; then
-            echo "✅ DeepWiki content successfully crawled and deployed!"
+            echo "✅ DeepWiki content successfully crawled!"
             echo "📄 Created documentation for ${{ steps.check-repo.outputs.org_repo }}"
-            echo "🔗 Available at: ${{ steps.deployment.outputs.page_url }}"
             echo "💡 This repository was not previously indexed on DeepWiki"
           else
             echo "❌ No content was crawled for ${{ steps.check-repo.outputs.org_repo }}"
