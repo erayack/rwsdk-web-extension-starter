@@ -63,17 +63,17 @@ jobs:
       id: repo-info
       run: |
         set -e
-        
+
         # Input validation function
         validate_repo_id() {
           local repo_id="$1"
           # Allow only alphanumeric, hyphens, underscores, dots, and forward slashes
-          if [[ ! "$repo_id" =~ ^[a-zA-Z0-9._/-]+$ ]] || [[ "$repo_id" =~ [;&|`$(){}[\]<>] ]]; then
+          if [[ ! "$repo_id" =~ ^[a-zA-Z0-9._/-]+$ ]] || [[ "$repo_id" =~ [\;\&\|\`\$\(\)\{\}\[\]\<\>] ]]; then
             echo "Error: Invalid repository identifier format" >&2
             exit 1
           fi
           # Validate format (owner/repo or URL)
-          if [[ "$repo_id" =~ ^https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/?$ ]] || 
+          if [[ "$repo_id" =~ ^https://github\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/?$ ]] ||
              [[ "$repo_id" =~ ^https://deepwiki\.com/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+/?$ ]] ||
              [[ "$repo_id" =~ ^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$ ]]; then
             return 0
@@ -82,7 +82,7 @@ jobs:
             exit 1
           fi
         }
-        
+
         if [ -n "${{ github.event.inputs.repo_identifier }}" ]; then
           REPO_ID="${{ github.event.inputs.repo_identifier }}"
           validate_repo_id "$REPO_ID"
@@ -98,7 +98,7 @@ jobs:
       id: set-deployment-url
       run: |
         set -e
-        
+
         REPO_ID="${{ steps.repo-info.outputs.repo_id }}"
 
         # Extract org/repo from different formats with validation
@@ -123,7 +123,7 @@ jobs:
     - name: Validate email input
       run: |
         set -e
-        
+
         validate_email() {
           local email="$1"
           if [[ -n "$email" ]] && [[ ! "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
@@ -131,7 +131,7 @@ jobs:
             exit 1
           fi
         }
-        
+
         EMAIL="${{ github.event.inputs.email }}"
         if [ -n "$EMAIL" ]; then
           validate_email "$EMAIL"
@@ -144,10 +144,10 @@ jobs:
       id: check-repo
       run: |
         set -e
-        
+
         cat > check-deepwiki.js << 'EOF'
         const fetch = require('node-fetch');
-        
+
         const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT) || 30000;
         const RETRY_ATTEMPTS = parseInt(process.env.RETRY_ATTEMPTS) || 3;
         const USER_AGENT = process.env.USER_AGENT || 'DeepWiki-Crawler/1.0';
@@ -272,7 +272,7 @@ jobs:
           echo "No email provided (triggered by push). Using default..."
           EMAIL="crawler@example.com"
         fi
-        
+
         # Use parameterized execution to prevent command injection
         node check-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}" "$EMAIL"
 
@@ -297,12 +297,12 @@ jobs:
             this.head = 0;
             this.tail = 0;
           }
-          
+
           enqueue(item) {
             this.items[this.tail] = item;
             this.tail++;
           }
-          
+
           dequeue() {
             if (this.isEmpty()) return null;
             const item = this.items[this.head];
@@ -310,11 +310,11 @@ jobs:
             this.head++;
             return item;
           }
-          
+
           isEmpty() {
             return this.head === this.tail;
           }
-          
+
           size() {
             return this.tail - this.head;
           }
@@ -590,7 +590,7 @@ jobs:
             console.log('⏳ No content extracted immediately - this is normal!');
             console.log('🔄 DeepWiki indexing takes time. The repository will be indexed eventually.');
             console.log(`🔗 Check back later at: https://deepwiki.com/${repoIdentifier.replace('https://github.com/', '').replace('https://deepwiki.com/', '')}`);
-            
+
             // Validate that we at least tried to crawl
             if (crawlStats.attempted === 0) {
               console.error('No pages were attempted to be crawled');
@@ -605,20 +605,20 @@ jobs:
     - name: Run DeepWiki crawler
       run: |
         set -e
-        
+
         EMAIL="${{ github.event.inputs.email }}"
         if [ -z "$EMAIL" ]; then
           echo "No email provided (triggered by push). Using default..."
           EMAIL="crawler@example.com"
         fi
-        
+
         # Use parameterized execution to prevent command injection
         node crawl-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}" "$EMAIL"
 
     - name: Show results summary
       run: |
         set -e
-        
+
         echo "🎯 DeepWiki Crawl Results for ${{ steps.check-repo.outputs.org_repo }}"
         echo "🔗 DeepWiki URL: https://deepwiki.com/${{ steps.check-repo.outputs.org_repo }}"
         echo ""
@@ -638,6 +638,6 @@ jobs:
           fi
           echo "💡 Check the DeepWiki URL above periodically - documentation will appear once indexing completes"
         fi
-        
+
         # Cleanup temporary files
         rm -f check-deepwiki.js crawl-deepwiki.js
