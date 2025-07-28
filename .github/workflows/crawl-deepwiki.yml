@@ -4,7 +4,7 @@ on:
   # Trigger on push to main branch
   push:
     branches: [ main ]
-  
+
   # Allow manual trigger
   workflow_dispatch:
     inputs:
@@ -37,7 +37,7 @@ jobs:
     outputs:
       repo_exists: ${{ steps.check-repo.outputs.repo_exists }}
       org_repo: ${{ steps.check-repo.outputs.org_repo }}
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -50,18 +50,28 @@ jobs:
 
     - name: Install dependencies
       run: |
-        npm install node-fetch cheerio @types/node
+        npm install node-fetch@2.7.0 cheerio @types/node
+
+    - name: Determine repository identifier
+      id: repo-info
+      run: |
+        if [ -n "${{ github.event.inputs.repo_identifier }}" ]; then
+          echo "repo_id=${{ github.event.inputs.repo_identifier }}" >> $GITHUB_OUTPUT
+        else
+          echo "repo_id=${{ github.repository }}" >> $GITHUB_OUTPUT
+        fi
+        echo "Repository identifier: $(cat $GITHUB_OUTPUT | grep repo_id | cut -d'=' -f2)"
 
     - name: Check if repository exists on DeepWiki
       id: check-repo
       run: |
         cat > check-deepwiki.js << 'EOF'
-        const fetch = require('node-fetch').default;
+        const fetch = require('node-fetch');
 
         async function checkRepoExistsOnDeepWiki(repoIdentifier) {
           // Extract org/repo from different input formats
           let orgRepo = '';
-          
+
           if (repoIdentifier.startsWith('https://github.com/')) {
             const url = new URL(repoIdentifier);
             const pathParts = url.pathname.split('/').filter(Boolean);
@@ -105,11 +115,11 @@ jobs:
 
             const responseBodyText = await response.text();
             const parsedJson = JSON.parse(responseBodyText);
-            
+
             if (parsedJson && Array.isArray(parsedJson.indices)) {
               const apiResults = parsedJson.indices;
               const repoExists = apiResults.some(repo => repo.repo_name === orgRepo);
-              
+
               if (repoExists) {
                 console.log(`✅ Repository ${orgRepo} found on DeepWiki`);
                 const fs = require('fs');
@@ -135,23 +145,13 @@ jobs:
         const repoIdentifier = process.argv[2];
         checkRepoExistsOnDeepWiki(repoIdentifier);
         EOF
-        
-        node check-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}"
 
-    - name: Determine repository identifier
-      id: repo-info
-      run: |
-        if [ -n "${{ github.event.inputs.repo_identifier }}" ]; then
-          echo "repo_id=${{ github.event.inputs.repo_identifier }}" >> $GITHUB_OUTPUT
-        else
-          echo "repo_id=${{ github.repository }}" >> $GITHUB_OUTPUT
-        fi
-        echo "Repository identifier: $(cat $GITHUB_OUTPUT | grep repo_id | cut -d'=' -f2)"
+        node check-deepwiki.js "${{ steps.repo-info.outputs.repo_id }}"
 
     - name: Create crawl script
       run: |
         cat > crawl-deepwiki.js << 'EOF'
-        const fetch = require('node-fetch').default;
+        const fetch = require('node-fetch');
         const cheerio = require('cheerio');
         const fs = require('fs');
         const { URL } = require('url');
@@ -244,7 +244,7 @@ jobs:
             return;
           }
           activeCount.current++;
-          
+
           try {
             let keepWorking = true;
             while (keepWorking) {
@@ -288,7 +288,7 @@ jobs:
           const queue = [];
           const allContent = [];
           const activeCount = { current: 0 };
-          
+
           const crawlStats = {
             attempted: 0,
             successful: 0,
@@ -311,7 +311,7 @@ jobs:
 
           if (allContent.length > 0) {
             const finalContent = allContent.join('\n');
-            
+
             // Create index.html with the content
             const htmlContent = `<!DOCTYPE html>
         <html lang="en">
@@ -357,7 +357,7 @@ jobs:
 
             fs.writeFileSync('index.html', htmlContent);
             fs.writeFileSync('deepwiki-content.md', finalContent);
-            
+
             console.log('Generated index.html and deepwiki-content.md');
           } else {
             console.error('No content extracted. Check repository URL or Deepwiki availability.');
