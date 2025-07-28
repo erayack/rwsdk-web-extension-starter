@@ -363,8 +363,9 @@ jobs:
 
             console.log('Generated index.html and deepwiki-content.md');
           } else {
-            console.error('No content extracted. Check repository URL or Deepwiki availability.');
-            process.exit(1);
+            console.log('⏳ No content extracted immediately - this is normal!');
+            console.log('🔄 DeepWiki indexing takes time. The repository will be indexed eventually.');
+            console.log(`🔗 Check back later at: https://deepwiki.com/${repoIdentifier.replace('https://github.com/', '').replace('https://deepwiki.com/', '')}`);
           }
         }
 
@@ -382,16 +383,21 @@ jobs:
 
     - name: Show results summary
       run: |
+        echo "🎯 DeepWiki Crawl Results for ${{ steps.check-repo.outputs.org_repo }}"
+        echo "🔗 DeepWiki URL: https://deepwiki.com/${{ steps.check-repo.outputs.org_repo }}"
+        echo ""
+
         if [ "${{ steps.check-repo.outputs.repo_exists }}" == "true" ]; then
-          echo "✅ Repository ${{ steps.check-repo.outputs.org_repo }} was already indexed on DeepWiki!"
-          echo "🔗 DeepWiki: https://deepwiki.com/${{ steps.check-repo.outputs.org_repo }}"
+          echo "✅ Repository was already indexed on DeepWiki!"
+          echo "📚 Documentation should be available immediately"
         else
+          echo "🔄 Repository indexing initiated on DeepWiki"
           if [ -f "deepwiki-content.md" ]; then
-            echo "✅ DeepWiki content successfully crawled!"
-            echo "📄 Created documentation for ${{ steps.check-repo.outputs.org_repo }}"
-            echo "💡 This repository was not previously indexed on DeepWiki"
+            echo "✅ Some content was crawled successfully"
+            echo "📄 Generated local documentation files"
           else
-            echo "❌ No content was crawled for ${{ steps.check-repo.outputs.org_repo }}"
-            echo "💡 Repository may not have accessible documentation pages"
+            echo "⏳ No content extracted immediately (this is normal!)"
+            echo "🕐 DeepWiki indexing happens asynchronously and takes time"
           fi
+          echo "💡 Check the DeepWiki URL above periodically - documentation will appear once indexing completes"
         fi
