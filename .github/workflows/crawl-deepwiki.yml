@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  deployments: write
 
 # Allow only one concurrent crawl
 concurrency:
@@ -27,6 +28,9 @@ concurrency:
 
 jobs:
   crawl:
+    environment:
+      name: deepwiki
+      url: ${{ steps.set-deployment-url.outputs.deepwiki_url }}
     runs-on: ubuntu-latest
     outputs:
       repo_exists: ${{ steps.check-repo.outputs.repo_exists }}
@@ -55,6 +59,24 @@ jobs:
           echo "repo_id=${{ github.repository }}" >> $GITHUB_OUTPUT
         fi
         echo "Repository identifier: $(cat $GITHUB_OUTPUT | grep repo_id | cut -d'=' -f2)"
+
+    - name: Set deployment URL
+      id: set-deployment-url
+      run: |
+        REPO_ID="${{ steps.repo-info.outputs.repo_id }}"
+
+        # Extract org/repo from different formats
+        if [[ "$REPO_ID" == https://github.com/* ]]; then
+          ORG_REPO=$(echo "$REPO_ID" | sed 's|https://github.com/||' | sed 's|\.git$||')
+        elif [[ "$REPO_ID" == https://deepwiki.com/* ]]; then
+          ORG_REPO=$(echo "$REPO_ID" | sed 's|https://deepwiki.com/||' | sed 's|/$||')
+        else
+          ORG_REPO="$REPO_ID"
+        fi
+
+        DEEPWIKI_URL="https://deepwiki.com/$ORG_REPO"
+        echo "deepwiki_url=$DEEPWIKI_URL" >> $GITHUB_OUTPUT
+        echo "📍 DeepWiki URL will be: $DEEPWIKI_URL"
 
     - name: Check if repository exists on DeepWiki
       id: check-repo
