@@ -1,9 +1,8 @@
 name: Crawl DeepWiki Documentation
 
 on:
-  # Trigger on push to main branch
+  # Trigger on push to any branch
   push:
-    branches: [ main ]
 
   # Allow manual trigger
   workflow_dispatch:
@@ -13,10 +12,6 @@ on:
         required: false
         default: ''
         type: string
-
-  # Trigger on schedule (daily at 2 AM UTC)
-  schedule:
-    - cron: '0 2 * * *'
 
 permissions:
   contents: read
